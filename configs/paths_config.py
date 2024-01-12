@@ -13,10 +13,10 @@ experiments_output_dir = './output'
 
 ## Input info
 ### Input dir, where the images reside
-image_original = './image_original'
-input_data_path = './image_processed'
+image_original = './image_original_yh-talk-9'
+input_data_path = './image_processed_yh-talk-9'
 ### Inversion identifier, used to keeping track of the inversion results. Both the latent code and the generator
-input_data_id = 'barcelona'
+input_data_id = 'yh-talk-9'
 
 ## Keywords
 pti_results_keyword = 'PTI'
