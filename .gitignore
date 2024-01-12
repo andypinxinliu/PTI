@@ -1,1 +1,3 @@
-
+embeddings/*
+checkpoints/*
+__pycache__
