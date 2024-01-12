@@ -31,7 +31,6 @@ def align_face(filepath, predictor, output_size):
     :param filepath: str
     :return: PIL Image
     """
-
     lm = get_landmark(filepath, predictor)
 
     lm_chin = lm[0: 17]  # left-right
@@ -65,7 +64,6 @@ def align_face(filepath, predictor, output_size):
 
     # read image
     img = PIL.Image.open(filepath)
-
     transform_size = output_size
     enable_padding = True
 

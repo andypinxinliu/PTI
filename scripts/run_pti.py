@@ -3,12 +3,15 @@ from string import ascii_uppercase
 from torch.utils.data import DataLoader
 from torchvision.transforms import transforms
 import os
+import sys
+sys.path.append('/p61/pliu23/research/Avatar/PTI')
 from configs import global_config, paths_config
 import wandb
 
 from training.coaches.multi_id_coach import MultiIDCoach
 from training.coaches.single_id_coach import SingleIDCoach
 from utils.ImagesDataset import ImagesDataset
+from utils.align_data import pre_process_images
 
 
 def run_PTI(run_name='', use_wandb=False, use_multi_id_training=False):
@@ -45,4 +48,5 @@ def run_PTI(run_name='', use_wandb=False, use_multi_id_training=False):
 
 
 if __name__ == '__main__':
-    run_PTI(run_name='', use_wandb=False, use_multi_id_training=False)
+    pre_process_images(paths_config.image_original)
+    run_PTI(run_name='', use_wandb=False, use_multi_id_training=True)

@@ -14,8 +14,7 @@ class MultiIDCoach(BaseCoach):
         super().__init__(data_loader, use_wandb)
 
     def train(self):
-        self.G.synthesis.train()
-        self.G.mapping.train()
+        self.G.train()
 
         w_path_dir = f'{paths_config.embedding_base_dir}/{paths_config.input_data_id}'
         os.makedirs(w_path_dir, exist_ok=True)

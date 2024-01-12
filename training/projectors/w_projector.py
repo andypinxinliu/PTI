@@ -33,12 +33,13 @@ def project(
         regularize_noise_weight=1e5,
         verbose=False,
         device: torch.device,
+        vgg16: torch.nn.Module,
         use_wandb=False,
         initial_w=None,
         image_log_step=global_config.image_rec_result_log_snapshot,
         w_name: str
 ):
-    assert target.shape == (G.img_channels, G.img_resolution, G.img_resolution)
+    # assert target.shape == (G.img_channels, G.img_resolution, G.img_resolution)
 
     def logprint(*args):
         if verbose:
@@ -47,23 +48,17 @@ def project(
     G = copy.deepcopy(G).eval().requires_grad_(False).to(device).float()  # type: ignore
 
     # Compute w stats.
-    logprint(f'Computing W midpoint and stddev using {w_avg_samples} samples...')
-    z_samples = np.random.RandomState(123).randn(w_avg_samples, G.z_dim)
-    w_samples = G.mapping(torch.from_numpy(z_samples).to(device), None)  # [N, L, C]
-    w_samples = w_samples[:, :1, :].cpu().numpy().astype(np.float32)  # [N, 1, C]
+    print(f'Computing W midpoint and stddev using {w_avg_samples} samples...')
+    
+    z_samples = np.random.RandomState(123).randn(w_avg_samples, 512)
+    w_samples = G.style(torch.from_numpy(z_samples).to(device).float()).unsqueeze(1).cpu().numpy()  # [N, 1, C]
     w_avg = np.mean(w_samples, axis=0, keepdims=True)  # [1, 1, C]
-    w_avg_tensor = torch.from_numpy(w_avg).to(global_config.device)
     w_std = (np.sum((w_samples - w_avg) ** 2) / w_avg_samples) ** 0.5
 
     start_w = initial_w if initial_w is not None else w_avg
-
-    # Setup noise inputs.
-    noise_bufs = {name: buf for (name, buf) in G.synthesis.named_buffers() if 'noise_const' in name}
-
-    # Load VGG16 feature detector.
-    url = 'https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/metrics/vgg16.pt'
-    with dnnlib.util.open_url(url) as f:
-        vgg16 = torch.jit.load(f).eval().to(device)
+    
+    # check the gpu use amount
+    print(f'gpu memory allocated: {torch.cuda.memory_allocated()}')
 
     # Features for target image.
     target_images = target.unsqueeze(0).to(device).to(torch.float32)
@@ -73,13 +68,9 @@ def project(
 
     w_opt = torch.tensor(start_w, dtype=torch.float32, device=device,
                          requires_grad=True)  # pylint: disable=not-callable
-    optimizer = torch.optim.Adam([w_opt] + list(noise_bufs.values()), betas=(0.9, 0.999),
+    optimizer = torch.optim.Adam([w_opt], betas=(0.9, 0.999),
                                  lr=hyperparameters.first_inv_lr)
 
-    # Init noise.
-    for buf in noise_bufs.values():
-        buf[:] = torch.randn_like(buf)
-        buf.requires_grad = True
 
     for step in tqdm(range(num_steps)):
 
@@ -95,29 +86,24 @@ def project(
 
         # Synth images from opt_w.
         w_noise = torch.randn_like(w_opt) * w_noise_scale
-        ws = (w_opt + w_noise).repeat([1, G.mapping.num_ws, 1])
-        synth_images = G.synthesis(ws, noise_mode='const', force_fp32=True)
+        ws = (w_opt + w_noise).repeat([1, 18, 1])
+        synth_images, _ = G([ws], input_is_latent=True)
 
         # Downsample image to 256x256 if it's larger than that. VGG was built for 224x224 images.
         synth_images = (synth_images + 1) * (255 / 2)
         if synth_images.shape[2] > 256:
             synth_images = F.interpolate(synth_images, size=(256, 256), mode='area')
+        
+        # breakpoint()
+        # # debug
+        # import torchvision
+        # torchvision.utils.save_image(synth_images, f'{step}.png', nrow=1, normalize=True, range=(-1, 1))
 
         # Features for synth images.
         synth_features = vgg16(synth_images, resize_images=False, return_lpips=True)
         dist = (target_features - synth_features).square().sum()
 
-        # Noise regularization.
-        reg_loss = 0.0
-        for v in noise_bufs.values():
-            noise = v[None, None, :, :]  # must be [1,1,H,W] for F.avg_pool2d()
-            while True:
-                reg_loss += (noise * torch.roll(noise, shifts=1, dims=3)).mean() ** 2
-                reg_loss += (noise * torch.roll(noise, shifts=1, dims=2)).mean() ** 2
-                if noise.shape[2] <= 8:
-                    break
-                noise = F.avg_pool2d(noise, kernel_size=2)
-        loss = dist + reg_loss * regularize_noise_weight
+        loss = dist
 
         if step % image_log_step == 0:
             with torch.no_grad():
@@ -132,11 +118,8 @@ def project(
         optimizer.step()
         logprint(f'step {step + 1:>4d}/{num_steps}: dist {dist:<4.2f} loss {float(loss):<5.2f}')
 
-        # Normalize noise.
-        with torch.no_grad():
-            for buf in noise_bufs.values():
-                buf -= buf.mean()
-                buf *= buf.square().mean().rsqrt()
 
     del G
+    # clear the cache
+    torch.cuda.empty_cache()
     return w_opt.repeat([1, 18, 1])

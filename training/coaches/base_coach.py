@@ -14,6 +14,12 @@ from criteria import l2_loss
 from models.e4e.psp import pSp
 from utils.log_utils import log_image_from_w
 from utils.models_utils import toogle_grad, load_old_G
+import copy
+import sys
+import dnnlib
+sys.path.append('/p61/pliu23/research/Avatar/')
+from model.stylegan import Generator
+
 
 
 class BaseCoach:
@@ -37,6 +43,11 @@ class BaseCoach:
         self.lpips_loss = LPIPS(net=hyperparameters.lpips_type).to(global_config.device).eval()
 
         self.restart_training()
+        
+        # Load VGG16 feature detector.
+        url = 'https://nvlabs-fi-cdn.nvidia.com/stylegan2-ada-pytorch/pretrained/metrics/vgg16.pt'
+        with dnnlib.util.open_url(url) as f:
+            self.vgg16 = torch.jit.load(f).eval().to(global_config.device)
 
         # Initialize checkpoint dir
         self.checkpoint_dir = paths_config.checkpoints_dir
@@ -45,10 +56,14 @@ class BaseCoach:
     def restart_training(self):
 
         # Initialize networks
-        self.G = load_old_G()
-        toogle_grad(self.G, True)
+        self.G = Generator(1024, 512, 8)
+        ckpt = torch.load(paths_config.stylegan2_ada_ffhq, map_location='cpu')
+        self.G.load_state_dict(ckpt['g_ema'], strict=False)
+        self.G = self.G.to('cuda')
 
-        self.original_G = load_old_G()
+        self.original_G = copy.deepcopy(self.G).eval()
+        
+        toogle_grad(self.G, True)
 
         self.space_regulizer = Space_Regulizer(self.original_G, self.lpips_loss)
         self.optimizer = self.configure_optimizers()
@@ -92,7 +107,7 @@ class BaseCoach:
             id_image = torch.squeeze((image.to(global_config.device) + 1) / 2) * 255
             w = w_projector.project(self.G, id_image, device=torch.device(global_config.device), w_avg_samples=600,
                                     num_steps=hyperparameters.first_inv_steps, w_name=image_name,
-                                    use_wandb=self.use_wandb)
+                                    use_wandb=self.use_wandb, vgg16=self.vgg16)
 
         return w
 
@@ -127,7 +142,7 @@ class BaseCoach:
         return loss, l2_loss_val, loss_lpips
 
     def forward(self, w):
-        generated_images = self.G.synthesis(w, noise_mode='const', force_fp32=True)
+        generated_images, _ = self.G([w], input_is_latent=True)
 
         return generated_images
 
