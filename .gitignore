@@ -2,4 +2,3 @@ embeddings/*
 checkpoints/*
 __pycache__
 image*
-checkpoints/model_yh_nf.pt
